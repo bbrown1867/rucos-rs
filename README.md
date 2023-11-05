@@ -1,7 +1,5 @@
 # RuCOS
 
-Hello
-
 _Rust Microcontroller Operating System_ (RuCOS, pronounced roo-cos) is a
 real-time kernel for embedded Rust applications (`no_std`).
 

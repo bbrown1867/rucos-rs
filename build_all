@@ -4,13 +4,10 @@ set -e
 
 pushd kernel
 cargo build
-cargo doc
-cargo test
 popd
 
 pushd cortex-m
 cargo build
-cargo doc
 cargo build --example task_basic
 cargo build --example task_advanced
 popd

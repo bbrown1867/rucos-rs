@@ -1,4 +1,4 @@
-//! Rust Microcontroller Operating System (RuCOS)
+//! Rust Microcontroller Operating System (RuCOS) Kernel
 
 #![cfg_attr(not(test), no_std)]
 

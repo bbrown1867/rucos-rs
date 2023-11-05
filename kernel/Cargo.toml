@@ -1,0 +1,13 @@
+[package]
+name = "rucos"
+version = "0.1.0"
+authors = ["Ben Brown <ben@beninter.net>"]
+edition = "2021"
+description = "Rust Microcontroller Operating System"
+readme = "../README.md"
+repository = "https://github.com/bbrown1867/rucos"
+license = "BSD-3-Clause"
+keywords = ["rtos"]
+
+[dependencies]
+heapless = "0.7"

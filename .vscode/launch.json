@@ -1,0 +1,39 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "probe-rs-debug",
+            "request": "launch",
+            "name": "Debug",
+            "cwd": "${workspaceFolder}/cortex-m",
+            "speed": 1800,
+            "probe": "0483:374b",
+            "runtimeExecutable": "probe-rs",
+            "runtimeArgs": ["dap-server"],
+            "chip": "STM32F767ZITx",
+            "flashingConfig": {
+                "flashingEnabled": true,
+                "haltAfterReset": false,
+                "formatOptions": {
+                    "format": "elf"
+                }
+            },
+            "coreConfigs": [
+                {
+                    "coreIndex": 0,
+                    "programBinary": "target/thumbv7em-none-eabihf/debug/examples/task_basic",
+                    "rttEnabled": true,
+                    "rttChannelFormats": [
+                        {
+                            "channelNumber": 0,
+                            "dataFormat": "String",
+                            "showTimestamps": true
+                        }
+                    ]
+                }
+            ],
+            "consoleLogLevel": "Info",
+            "preLaunchTask": "Build"
+        }
+    ]
+    }

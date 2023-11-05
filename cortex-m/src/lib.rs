@@ -1,4 +1,4 @@
-//! A port of the RuCOS kernel to Cortex-M
+//! A port of the RuCOS kernel to ARM Cortex-M
 
 #![no_std]
 #![feature(naked_functions)]

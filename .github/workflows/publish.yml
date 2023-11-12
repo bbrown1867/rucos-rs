@@ -14,4 +14,4 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: cd kernel && cargo login ${CRATES_TOKEN} && cargo publish
-      - run: cd cortex-m && ccargo login ${CRATES_TOKEN} && cargo publish
+      - run: cd cortex-m && cargo login ${CRATES_TOKEN} && cargo publish

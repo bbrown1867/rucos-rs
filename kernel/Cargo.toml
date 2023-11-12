@@ -1,11 +1,11 @@
 [package]
 name = "rucos"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Ben Brown <ben@beninter.net>"]
 edition = "2021"
 description = "Rust Microcontroller Operating System (RuCOS) Kernel"
 readme = "../README.md"
-repository = "https://github.com/bbrown1867/rucos"
+repository = "https://github.com/bbrown1867/rucos-rs"
 license = "BSD-3-Clause"
 keywords = ["rtos"]
 

@@ -13,5 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - run: cd kernel && cargo publish --token ${CRATES_TOKEN}
-      - run: cd cortex-m && cargo publish --token ${CRATES_TOKEN}
+      - run: cargo login ${CRATES_TOKEN}
+      - run: cd kernel && cargo publish
+      - run: cd cortex-m && cargo publish

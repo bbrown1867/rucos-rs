@@ -18,16 +18,16 @@ real-time kernel for embedded Rust applications (`no_std`).
 
 ### Architecture
 
-The RuCOS `kernel` is a collection of `no_std` data structures. It has no
-platform specific or `unsafe` code. The `Kernel` struct is designed to be used
-as a singleton in an embedded application.
+The [`rucos`](kernel) crate is a collection of `no_std` data structures. It has
+no platform specific or `unsafe` code. The `Kernel` struct is designed to be
+used as a singleton in an embedded application.
 
-The `kernel` would be difficult to use by itself, as the embedded application
+The `rucos` crate would be difficult to use alone, as the embedded application
 needs a mutable reference to the `Kernel` singleton in every task. This is
-where the "port specific" crate comes in (e.g. `cortex-m`). The port specific
-crate creates wrappers around the `kernel` APIs, dealing with platform specific
-details (e.g. stack initialization) and handling the `Kernel` singleton in a
-safe way (e.g. disabling interrupts).
+where the "port specific" crate comes in (e.g. [`rucos-cortex-m`](cortex-m)).
+The port specific crate creates wrappers around the `Kernel` APIs, dealing with
+platform specific details (e.g. stack initialization) and handling the `Kernel`
+singleton in a safe way (e.g. disabling interrupts).
 
 ### Getting Started
 
@@ -56,10 +56,10 @@ rucos::start(...);
 
 ### Dependencies
 
-* To build the `kernel`, only the Rust toolchain is required
-* To build the `cortex-m` port, the `nightly` Rust toolchain is required
-* To run the `cortex-m` port examples, [`probe-rs`](https://probe.rs/) is required
-* To debug the `cortex-m` port examples, the `probe-rs` VS Code extension is required
+* To build `rucos`, only the Rust toolchain is required
+* To build `rucos-cortex-m`, the `nightly` Rust toolchain is required
+* To run the `rucos-cortex-m` examples, [`probe-rs`](https://probe.rs/) is required
+* To debug the `rucos-cortex-m` examples, the `probe-rs` VS Code extension is required
 
 ### Building
 
@@ -67,15 +67,15 @@ rucos::start(...);
 
 ### Testing
 
-#### [`kernel`](kernel/)
+#### [`rucos`](kernel/)
 
     cd kernel && cargo test
 
-#### [`cortex-m`](cortex-m)
+#### [`rucos-cortex-m`](cortex-m)
 
-Testing the RuCOS `cortex-m` crate requires targeting a particular device.
-The STM32F767 micrcontroller is used as the test platform, but note that the
-example code should be easily portable to other devices.
+Testing `rucos-cortex-m` requires targeting a particular device. The STM32F767
+microcontroller is used as the test platform, but note that the example code
+should be easily portable to other devices.
 
 Ideally `cargo test` would be used to automate target testing via `defmt-test`,
 but the nature of RuCOS applications is that they do not terminate and or follow

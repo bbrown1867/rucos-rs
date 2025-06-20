@@ -3,9 +3,9 @@
 #![no_std]
 
 use core::arch::asm;
-use core::mem::MaybeUninit;
+use core::cell::RefCell;
 use core::ptr::write_volatile;
-use cortex_m::interrupt::free;
+use cortex_m::interrupt::{free, Mutex};
 use cortex_m::peripheral::{scb, syst::SystClkSource, SCB, SYST};
 use rucos::Kernel;
 
@@ -17,7 +17,8 @@ pub const TICK_RATE_HZ: u64 = _TICK_RATE_HZ as u64;
 /// Maximum number of kernel tasks
 pub const MAX_NUM_TASKS: usize = 256;
 
-static mut KERNEL: MaybeUninit<Kernel<u32, u64, MAX_NUM_TASKS>> = MaybeUninit::uninit();
+static KERNEL: Mutex<RefCell<Option<Kernel<u32, u64, MAX_NUM_TASKS>>>> =
+    Mutex::new(RefCell::new(None));
 
 /// Initialize the kernel and create the idle task
 ///
@@ -31,9 +32,9 @@ static mut KERNEL: MaybeUninit<Kernel<u32, u64, MAX_NUM_TASKS>> = MaybeUninit::u
 /// The idle task is the lowest priority task and is always ready to run, it
 /// must not block or call any kernel APIs (e.g. `sleep`)
 pub fn init(idle_stack: &mut [u8], user_idle_task: Option<fn(u32) -> !>) {
-    unsafe {
-        KERNEL = MaybeUninit::new(Kernel::new());
-    }
+    free(|cs| {
+        KERNEL.borrow(cs).replace(Some(Kernel::new()));
+    });
 
     match user_idle_task {
         Some(entry) => create(usize::MAX, usize::MAX, idle_stack, entry, None),
@@ -86,11 +87,9 @@ pub fn create(id: usize, priority: usize, stack: &mut [u8], entry: fn(u32) -> !,
         unsafe { write_volatile(stack_ptr as *mut u32, register_value) };
     }
 
-    free(|_| {
-        let kernel = unsafe { &mut *KERNEL.as_mut_ptr() };
-        if kernel.create(id, priority, stack_ptr) {
-            SCB::set_pendsv();
-        }
+    with_kernel(|kernel| {
+        kernel.create(id, priority, stack_ptr);
+        SCB::set_pendsv();
     });
 }
 
@@ -104,8 +103,7 @@ pub fn create(id: usize, priority: usize, stack: &mut [u8], entry: fn(u32) -> !,
 ///
 /// A context switch may occur after calling this API
 pub fn delete(id: Option<usize>) {
-    free(|_| {
-        let kernel = unsafe { &mut *KERNEL.as_mut_ptr() };
+    with_kernel(|kernel| {
         if kernel.delete(id) {
             SCB::set_pendsv();
         }
@@ -125,8 +123,7 @@ pub fn delete(id: Option<usize>) {
 /// Does not return: Program execution continues from tasks or interrupt
 /// handlers after calling this API
 pub fn start(scb: &mut SCB, systick: &mut SYST, clock_freq_hz: u32) -> ! {
-    let kernel = unsafe { &mut *KERNEL.as_mut_ptr() };
-    let first_task_stack_ptr = kernel.start();
+    let first_task_stack_ptr = with_kernel(|kernel| kernel.start());
 
     systick.set_reload((clock_freq_hz / _TICK_RATE_HZ) - 1);
     systick.clear_current();
@@ -165,10 +162,7 @@ pub fn start(scb: &mut SCB, systick: &mut SYST, clock_freq_hz: u32) -> ! {
 ///
 /// ID of the current task
 pub fn get_current_task() -> usize {
-    let kernel = unsafe { &mut *KERNEL.as_mut_ptr() };
-
-    // Does not modify the kernel
-    kernel.get_current_task()
+    with_kernel(|kernel| kernel.get_current_task())
 }
 
 /// Get the current value of the kernel tick
@@ -181,10 +175,7 @@ pub fn get_current_task() -> usize {
 ///
 /// Ticks correspond to system time based on `TICK_RATE_HZ`
 pub fn get_current_tick() -> u64 {
-    let kernel = unsafe { &mut *KERNEL.as_mut_ptr() };
-
-    // Does not modify the kernel
-    kernel.get_current_tick()
+    with_kernel(|kernel| kernel.get_current_tick())
 }
 
 /// Sleep the current task
@@ -197,8 +188,7 @@ pub fn get_current_tick() -> u64 {
 ///
 /// Ticks correspond to system time based on `TICK_RATE_HZ`
 pub fn sleep(delay: u64) {
-    free(|_| {
-        let kernel = unsafe { &mut *KERNEL.as_mut_ptr() };
+    with_kernel(|kernel| {
         if kernel.sleep(delay) {
             SCB::set_pendsv();
         }
@@ -215,8 +205,7 @@ pub fn sleep(delay: u64) {
 ///
 /// A context switch may occur after calling this API
 pub fn suspend(id: Option<usize>) {
-    free(|_| {
-        let kernel = unsafe { &mut *KERNEL.as_mut_ptr() };
+    with_kernel(|kernel| {
         if kernel.suspend(id) {
             SCB::set_pendsv();
         }
@@ -233,8 +222,7 @@ pub fn suspend(id: Option<usize>) {
 ///
 /// A context switch may occur after calling this API
 pub fn resume(id: usize) {
-    free(|_| {
-        let kernel = unsafe { &mut *KERNEL.as_mut_ptr() };
+    with_kernel(|kernel| {
         if kernel.resume(id) {
             SCB::set_pendsv();
         }
@@ -247,8 +235,7 @@ pub fn resume(id: usize) {
 /// scheduler
 #[no_mangle]
 pub extern "C" fn SysTick() {
-    free(|_| {
-        let kernel = unsafe { &mut *KERNEL.as_mut_ptr() };
+    with_kernel(|kernel| {
         if kernel.tick_update(1) {
             SCB::set_pendsv();
         }
@@ -293,8 +280,32 @@ pub unsafe extern "C" fn PendSV() {
 /// Stack pointer of the next task
 #[no_mangle]
 fn context_switch(curr_task_stack_ptr: u32) -> u32 {
-    let kernel = unsafe { &mut *KERNEL.as_mut_ptr() };
-    kernel.handle_context_switch(Some(curr_task_stack_ptr))
+    with_kernel(|kernel| kernel.handle_context_switch(Some(curr_task_stack_ptr)))
+}
+
+/// Helper for safe kernel access
+///
+/// # Arguments
+///
+/// * `func`: Closure to execute with the kernel passed as input.
+///
+/// # Returns
+///
+/// The return value of `func`.
+///
+/// # Note
+///
+/// `func` is executed in a critical section - all interrupts are disabled. This
+/// makes accessing `KERNEL` safe on a single-core microcontroller.
+fn with_kernel<F, R>(func: F) -> R
+where
+    F: FnOnce(&mut Kernel<u32, u64, MAX_NUM_TASKS>) -> R,
+{
+    free(|cs| {
+        let mut kernel_ref = KERNEL.borrow(cs).borrow_mut();
+        let kernel = kernel_ref.as_mut().expect("Kernel not initialized");
+        func(kernel)
+    })
 }
 
 /// Tasks should not exit

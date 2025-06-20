@@ -16,4 +16,4 @@
 ## Infrastructure
 
 - [x] Add GitHub Actions for build, unit tests, and crate publishing
-- [ ] Remove `nightly` dependency in `cortex-m` crate: Using `naked_functions` feature for context switching
+- [x] Remove `nightly` dependency in `cortex-m` crate: Using `naked_functions` feature for context switching

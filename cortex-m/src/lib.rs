@@ -1,7 +1,6 @@
 //! A port of the RuCOS kernel to ARM Cortex-M
 
 #![no_std]
-#![feature(naked_functions)]
 
 use core::arch::asm;
 use core::mem::MaybeUninit;
@@ -259,32 +258,28 @@ pub extern "C" fn SysTick() {
 /// PendSV interrupt handler
 ///
 /// Context switch implementation
-#[naked]
-#[no_mangle]
-pub extern "C" fn PendSV() {
-    unsafe {
-        // TODO: Replace disabling interrupts with BASEPRI adjustment
-        asm!(
-            "cpsid     i",                    // Disable interrupts
-            "mrs       r0, psp",              // Read PSP
-            "mov       r1, lr",               // Save LR
-            "tst       r14, #0x10",           // Check if FPU is being used
-            "it        eq",                   // ...
-            "vstmdbeq  r0!, {{s16-s31}}",     // Push the FPU registers
-            "stmdb     r0!, {{r4-r11, r14}}", // Push the CPU registers
-            "push      {{r1}}",               // Push LR
-            "bl        context_switch",       // context_switch(R0) -> R0
-            "pop       {{r1}}",               // Pop LR
-            "ldmia     r0!, {{r4-r11, r14}}", // Pop the CPU registers
-            "tst       r14, #0x10",           // Check if FPU is being used
-            "it        eq",                   // ...
-            "vldmiaeq  r0!, {{s16-s31}}",     // Pop the FPU registers
-            "msr       psp, r0",              // Write PSP
-            "cpsie     i",                    // Enable interrupts
-            "bx        r1",                   // Branch to next task
-            options(noreturn),
-        );
-    }
+#[naked_function::naked]
+pub unsafe extern "C" fn PendSV() {
+    // TODO: Replace disabling interrupts with BASEPRI adjustment
+    asm!(
+        "cpsid     i",                    // Disable interrupts
+        "mrs       r0, psp",              // Read PSP
+        "mov       r1, lr",               // Save LR
+        "tst       r14, #0x10",           // Check if FPU is being used
+        "it        eq",                   // ...
+        "vstmdbeq  r0!, {{s16-s31}}",     // Push the FPU registers
+        "stmdb     r0!, {{r4-r11, r14}}", // Push the CPU registers
+        "push      {{r1}}",               // Push LR
+        "bl        context_switch",       // context_switch(R0) -> R0
+        "pop       {{r1}}",               // Pop LR
+        "ldmia     r0!, {{r4-r11, r14}}", // Pop the CPU registers
+        "tst       r14, #0x10",           // Check if FPU is being used
+        "it        eq",                   // ...
+        "vldmiaeq  r0!, {{s16-s31}}",     // Pop the FPU registers
+        "msr       psp, r0",              // Write PSP
+        "cpsie     i",                    // Enable interrupts
+        "bx        r1",                   // Branch to next task
+    );
 }
 
 /// Perform a context switch

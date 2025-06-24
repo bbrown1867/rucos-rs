@@ -12,7 +12,7 @@ keywords = ["rtos", "arm", "cortex-m"]
 [dependencies]
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 naked-function = "0.1.5"
-rucos = { version = "0.1.1", path = "../kernel" }
+rucos = { version = "0.2.0", path = "../kernel" }
 
 [dev-dependencies]
 cortex-m-rt = "0.7.3"

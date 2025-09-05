@@ -56,8 +56,7 @@ rucos::start(...);
 
 ### Dependencies
 
-* To build `rucos`, only the Rust toolchain is required
-* To build `rucos-cortex-m`, the `nightly` Rust toolchain is required
+* To build `rucos` and `rucos-cortex-m`, the Rust toolchain is required
 * To run the `rucos-cortex-m` examples, [`probe-rs`](https://probe.rs/) is required
 * To debug the `rucos-cortex-m` examples, the `probe-rs` VS Code extension is required
 

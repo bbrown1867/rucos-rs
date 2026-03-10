@@ -41,6 +41,53 @@ pub fn init(idle_stack: &mut [u8], user_idle_task: Option<fn(u32) -> !>) {
     }
 }
 
+/// Start the kernel
+///
+/// # Arguments
+///
+/// * `scb`: System control block (from the `cortex-m` crate)
+/// * `systick`: System tick  (from the `cortex-m` crate)
+/// * `clock_freq_hz`: Core clock frequency in hertz
+///
+/// # Note
+///
+/// Does not return: Program execution continues from tasks or interrupt
+/// handlers after calling this API
+pub fn start(scb: &mut SCB, systick: &mut SYST, clock_freq_hz: u32) -> ! {
+    let kernel = unsafe { &mut *KERNEL.as_mut_ptr() };
+    let first_task_stack_ptr = kernel.start();
+
+    systick.set_reload((clock_freq_hz / _TICK_RATE_HZ) - 1);
+    systick.clear_current();
+    systick.set_clock_source(SystClkSource::Core);
+    systick.enable_interrupt();
+    systick.enable_counter();
+
+    unsafe {
+        // Context switch should only happen once all interrupts have been serviced
+        scb.set_priority(scb::SystemHandler::PendSV, 0xFF);
+
+        asm!(
+            "cpsid  i",                    // Disable interrupts
+            "mov    r0, {tmp}",            // Get first task stack pointer
+            "msr    psp, r0",              // Write PSP
+            "mrs    r1, control",          // Read CONTROL
+            "orr    r1, r1, #2",           // Set SP = PSP
+            "bic    r1, r1, #4",           // Clear FPCA (reset FPU)
+            "msr    control, r1",          // Write CONTROL
+            "isb",                         // Sync instructions
+            "ldmia  sp!, {{r4-r11, r14}}", // Restore R4 - R11, LR
+            "ldmia  sp!, {{r0-r3}}",       // Restore R0 - R3
+            "ldmia  sp!, {{r12, r14}}",    // Load R12 and LR
+            "ldmia  sp!, {{r1, r2}}",      // Load PC and discard xPSR
+            "cpsie  i",                    // Enable interrupts
+            "bx     r1",                   // Branch to first task
+            tmp = in(reg) first_task_stack_ptr,
+            options(noreturn),
+        )
+    };
+}
+
 /// Create a task
 ///
 /// # Arguments
@@ -110,53 +157,6 @@ pub fn delete(id: Option<usize>) {
             SCB::set_pendsv();
         }
     });
-}
-
-/// Start the kernel
-///
-/// # Arguments
-///
-/// * `scb`: System control block (from the `cortex-m` crate)
-/// * `systick`: System tick  (from the `cortex-m` crate)
-/// * `clock_freq_hz`: Core clock frequency in hertz
-///
-/// # Note
-///
-/// Does not return: Program execution continues from tasks or interrupt
-/// handlers after calling this API
-pub fn start(scb: &mut SCB, systick: &mut SYST, clock_freq_hz: u32) -> ! {
-    let kernel = unsafe { &mut *KERNEL.as_mut_ptr() };
-    let first_task_stack_ptr = kernel.start();
-
-    systick.set_reload((clock_freq_hz / _TICK_RATE_HZ) - 1);
-    systick.clear_current();
-    systick.set_clock_source(SystClkSource::Core);
-    systick.enable_interrupt();
-    systick.enable_counter();
-
-    unsafe {
-        // Context switch should only happen once all interrupts have been serviced
-        scb.set_priority(scb::SystemHandler::PendSV, 0xFF);
-
-        asm!(
-            "cpsid  i",                    // Disable interrupts
-            "mov    r0, {tmp}",            // Get first task stack pointer
-            "msr    psp, r0",              // Write PSP
-            "mrs    r1, control",          // Read CONTROL
-            "orr    r1, r1, #2",           // Set SP = PSP
-            "bic    r1, r1, #4",           // Clear FPCA (reset FPU)
-            "msr    control, r1",          // Write CONTROL
-            "isb",                         // Sync instructions
-            "ldmia  sp!, {{r4-r11, r14}}", // Restore R4 - R11, LR
-            "ldmia  sp!, {{r0-r3}}",       // Restore R0 - R3
-            "ldmia  sp!, {{r12, r14}}",    // Load R12 and LR
-            "ldmia  sp!, {{r1, r2}}",      // Load PC and discard xPSR
-            "cpsie  i",                    // Enable interrupts
-            "bx     r1",                   // Branch to first task
-            tmp = in(reg) first_task_stack_ptr,
-            options(noreturn),
-        )
-    };
 }
 
 /// Get the ID of the current task

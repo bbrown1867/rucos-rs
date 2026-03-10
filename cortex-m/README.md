@@ -105,3 +105,67 @@ Description of the special registers:
     - `0xFFFF_FFE1`: Return to handler mode using MSP (FPU extended frame)
     - `0xFFFF_FFE9`: Return to thread mode using MSP (FPU extended frame)
     - `0xFFFF_FFED`: Return to thread mode using PSP (FPU extended frame)
+
+### Ownership Model
+
+#### Review
+
+Rust ownership model for references:
+- One mutable reference or multiple immutable references, but not both
+- References must always be valid
+
+Interior mutability:
+- `Box<T>` - Heap-allocated with ownership model enforced at compile-time
+- `RefCell<T>`- Moves ownership model enforcement to run-time
+    - Will `panic` if violated
+    - Only can be used in single-threaded context, one data owner
+    - Useful when you know your code follows borrowing rules, but compiler doesn't
+- `Rc<T>` should replace `RefCell<T>` if there are multiple owners (ref counting)
+- `Arc<T>` should replace `Rc<T>` in multi-threaded context (atomic ref counting)
+
+#### Challenge
+
+`Kernel` is a singleton and `static mut`, which requires `unsafe` whenever used.
+A common embedded Rust pattern is to use `Mutex` + `RefCell` for safe access.
+`Mutex` is implemented in `cortex-m` crate and requires a critical section
+(interrupts disabled), making the access safe/atomic on a single-core MCU.
+
+```rust
+static KERNEL: Mutex<RefCell<Option<Kernel>>> = Mutex::new(RefCell::new(None));
+
+// Startup: Initialize kernel
+free(|cs| {
+    *KERNEL.borrow(cs).borrow_mut() = Some(Kernel::new());
+});
+
+// Later: Use kernel
+free(|cs| {
+    let kernel = KERNEL.borrow(cs).borrow_mut();
+});
+```
+
+This works because `Mutex` implements the `Sync` trait. However, this approach
+has two issues with respect to the current design of `rucos-cortex-m`.
+
+1. Interrupts are disabled a lot, which could cause real-time events to be missed.
+2. Disabling interrupts is not necessary in `init()` and not possible in `start()`.
+
+#### Solution Ideas
+
+- Move `KERNEL` to the application
+    - Gives flexibility for memory placement
+    - `init()` and `start()` can be passed a mutable reference
+- Update kernel APIs to use `svc` instruction
+    - Acts as a function call into the kernel
+    - Does not require accessing the singleton
+- Make two versions of `create()`: Before and after kernel start
+    - Before kernel start: Pass in a mutable reference to kernel
+    - After kernel start: Using `svc` instruction, like other kernel APIs
+- Interrupts (SysTick, PendSV, SVCall):
+    - Likely need to bind pointer to `KERNEL` in `start()` for ISRs
+    - Initial implementation can disable interrupts (`Mutex<RefCell<T>>` pattern)
+    - Then need to think more about atomics and other primitives
+- Could `Kernel` struct be lighterweight?
+    - Each task could have a reference to it's own "TCB" (`Task` struct)
+    - Does a linked-list implementation avoid needing a `Vec`?
+    - Kernel could use `Atomic` data types for other state (`core::sync::atomic`)

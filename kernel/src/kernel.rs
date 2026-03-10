@@ -44,6 +44,28 @@ where
         }
     }
 
+    /// Start the kernel
+    ///
+    /// # Returns
+    ///
+    /// Stack pointer for the first task to run
+    ///
+    /// # Panics
+    ///
+    /// * No tasks have been created
+    /// * The kernel is already running
+    pub fn start(&mut self) -> SP {
+        assert!(!self.is_running, "Kernel already running");
+
+        self.is_running = true;
+
+        if self.scheduler() == true {
+            self.handle_context_switch(None)
+        } else {
+            panic!("No tasks created")
+        }
+    }
+
     /// Create a task
     ///
     /// # Arguments
@@ -112,28 +134,6 @@ where
         }
 
         self.scheduler()
-    }
-
-    /// Start the kernel
-    ///
-    /// # Returns
-    ///
-    /// Stack pointer for the first task to run
-    ///
-    /// # Panics
-    ///
-    /// * No tasks have been created
-    /// * The kernel is already running
-    pub fn start(&mut self) -> SP {
-        assert!(!self.is_running, "Kernel already running");
-
-        self.is_running = true;
-
-        if self.scheduler() == true {
-            self.handle_context_switch(None)
-        } else {
-            panic!("No tasks created")
-        }
     }
 
     /// Get the ID of the current task

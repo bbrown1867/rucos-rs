@@ -2,12 +2,15 @@
 
 set -e
 
-pushd kernel
-cargo build
-popd
+for config in "" "--release"
+do
+    pushd kernel
+    cargo build $config
+    popd
 
-pushd cortex-m
-cargo build
-cargo build --example task_basic
-cargo build --example task_advanced
-popd
+    pushd cortex-m
+    cargo build $config
+    cargo build $config --example task_basic
+    cargo build $config --example task_advanced
+    popd
+done

@@ -261,8 +261,9 @@ pub extern "C" fn SysTick() {
 #[no_mangle]
 #[naked_function::naked]
 pub unsafe extern "C" fn PendSV() {
-    // TODO: Replace disabling interrupts with BASEPRI adjustment
+    // TODO: Should work on microcontrollers without floating point hardware
     asm!(
+        ".fpu fpv5-d16",                  // Enable FPU instructions
         "cpsid     i",                    // Disable interrupts
         "mrs       r0, psp",              // Read PSP
         "mov       r1, lr",               // Save LR

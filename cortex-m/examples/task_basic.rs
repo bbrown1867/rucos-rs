@@ -23,7 +23,6 @@ fn task_template(arg: u32) -> ! {
 fn main() -> ! {
     let mut resources = common::setup();
 
-    info!("Initializing");
     let mut idle_stack: [u8; common::IDLE_STACK_SIZE] = [0; common::IDLE_STACK_SIZE];
     rucos::init(&mut idle_stack, None);
 

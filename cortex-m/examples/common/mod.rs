@@ -8,6 +8,7 @@ use stm32f7xx_hal::{pac, prelude::*};
 pub const IDLE_STACK_SIZE: usize = 256;
 pub const TASK_STACK_SIZE: usize = 2048;
 
+// NOTE: Kernel must be initialized before using defmt macros
 defmt::timestamp!("{=u64:us}", rucos::get_current_tick());
 
 pub struct KernelResources {

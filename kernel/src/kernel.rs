@@ -339,7 +339,7 @@ where
         }
     }
 
-    // TODO: Assumes only one task per priority level, no round-robin scheduling
+    // TODO: Assumes only one task per priority level, no time slicing
     fn find_highest_priority_runnable_task(&self) -> Option<usize> {
         let mut highest_prio_runnable_task: Option<&Task<SP, TICK>> = None;
         for task in self.task_list.iter() {

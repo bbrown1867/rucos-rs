@@ -106,7 +106,7 @@ Description of the special registers:
     - `0xFFFF_FFE9`: Return to thread mode using MSP (FPU extended frame)
     - `0xFFFF_FFED`: Return to thread mode using PSP (FPU extended frame)
 
-### Ownership Model
+### Kernel Ownership
 
 #### Review
 
@@ -125,10 +125,10 @@ Interior mutability:
 
 #### Challenge
 
-`Kernel` is a singleton and `static mut`, which requires `unsafe` whenever used.
-A common embedded Rust pattern is to use `Mutex` + `RefCell` for safe access.
-`Mutex` is implemented in `cortex-m` crate and requires a critical section
-(interrupts disabled), making the access safe/atomic on a single-core MCU.
+In `v0.2.0`, `Kernel` is a singleton and `static mut`, which requires `unsafe`
+when used. A common embedded Rust pattern is to use `Mutex` + `RefCell` for
+safe access. `Mutex` is implemented in `cortex-m` crate and requires a critical
+section (interrupts disabled), making access atomic on a single-core MCU.
 
 ```rust
 static KERNEL: Mutex<RefCell<Option<Kernel>>> = Mutex::new(RefCell::new(None));
@@ -145,10 +145,10 @@ free(|cs| {
 ```
 
 This works because `Mutex` implements the `Sync` trait. However, this approach
-has two issues with respect to the current design of `rucos-cortex-m`.
+has two issues with respect to the current design of `rucos-cortex-m`:
 
 1. Interrupts are disabled a lot, which could cause real-time events to be missed.
-2. Disabling interrupts is not necessary in `init()` and not possible in `start()`.
+2. Disabling interrupts is not really necessary in `init()` and `start()`.
 
 #### Solution Ideas
 

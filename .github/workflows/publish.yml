@@ -1,4 +1,4 @@
-name: Publish 
+name: Publish
 
 on:
   release:
@@ -13,5 +13,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - run: cd kernel && cargo login ${CRATES_TOKEN} && cargo publish
-      - run: cd cortex-m && cargo login ${CRATES_TOKEN} && cargo publish
+      - run: cargo login ${CRATES_TOKEN}
+      - run: cargo publish

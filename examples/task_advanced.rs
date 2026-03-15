@@ -10,7 +10,10 @@
 mod common;
 
 use defmt::info;
-use rucos_cortex_m as rucos;
+use rucos;
+
+static TASK0: rucos::Task = rucos::Task::new(common::TASK0_ID, common::TASK0_PRIO);
+static TASK1: rucos::Task = rucos::Task::new(common::TASK1_ID, common::TASK1_PRIO);
 
 fn task0(_: u32) -> ! {
     let mut counter = 0;
@@ -18,10 +21,10 @@ fn task0(_: u32) -> ! {
     loop {
         if counter == 5 {
             info!("Task 0 suspending itself");
-            rucos::suspend(None);
+            rucos::suspend(common::TASK0_ID);
         } else {
-            info!("Hello from Task {}", rucos::get_current_task());
-            rucos::sleep(rucos::TICK_RATE_HZ);
+            info!("Hello from Task {}", rucos::get_current_task().id);
+            rucos::sleep(1000);
         }
 
         counter += 1;
@@ -34,18 +37,18 @@ fn task1(_: u32) -> ! {
     loop {
         if counter == 10 {
             info!("Task 1 resuming Task 0");
-            rucos::resume(0);
-            rucos::sleep(rucos::TICK_RATE_HZ);
+            rucos::resume(common::TASK0_ID);
+            rucos::sleep(1000);
         } else if counter == 15 {
             info!("Task 1 deleting Task 0");
-            rucos::delete(Some(0));
-            rucos::sleep(rucos::TICK_RATE_HZ);
+            rucos::delete(common::TASK0_ID);
+            rucos::sleep(1000);
         } else if counter == 20 {
             info!("Task 1 deleting itself");
-            rucos::delete(None);
+            rucos::delete(common::TASK1_ID);
         } else {
-            info!("Hello from Task {}", rucos::get_current_task());
-            rucos::sleep(rucos::TICK_RATE_HZ);
+            info!("Hello from Task {}", rucos::get_current_task().id);
+            rucos::sleep(1000);
         }
 
         counter += 1;
@@ -54,23 +57,20 @@ fn task1(_: u32) -> ! {
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
-    let mut resources = common::setup();
+    let resources = common::setup();
 
+    info!("Initializing kernel");
     let mut idle_stack: [u8; common::IDLE_STACK_SIZE] = [0; common::IDLE_STACK_SIZE];
     rucos::init(&mut idle_stack, None);
 
     info!("Creating Task 0");
     let mut task0_stack: [u8; common::TASK_STACK_SIZE] = [0; common::TASK_STACK_SIZE];
-    rucos::create(0, 0, &mut task0_stack, task0, None);
+    rucos::create(&TASK0, &mut task0_stack, task0, None);
 
     info!("Creating Task 1");
     let mut task1_stack: [u8; common::TASK_STACK_SIZE] = [0; common::TASK_STACK_SIZE];
-    rucos::create(1, 1, &mut task1_stack, task1, None);
+    rucos::create(&TASK1, &mut task1_stack, task1, None);
 
     info!("Starting");
-    rucos::start(
-        &mut resources.scb,
-        &mut resources.systick,
-        resources.clocks.hclk().to_Hz(),
-    );
+    rucos::start(resources.clocks.hclk().to_Hz());
 }

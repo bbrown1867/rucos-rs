@@ -4,7 +4,7 @@
         {
             "label": "Build",
             "type": "shell",
-            "command": "${workspaceRoot}/build_all",
+            "command": "cargo build --example task_basic",
             "group": {
                 "kind": "build",
                 "isDefault": true

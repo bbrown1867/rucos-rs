@@ -10,32 +10,24 @@ real-time kernel for embedded Rust applications (`no_std`).
 - Do not use the `async`/`await` pattern
 - Do not require memory management or protection hardware
 - Do not use experimental language features: Compile on `stable`
-- Portable: Clearly separate platform specific code from the kernel
-- Tested: Thanks to portability, we can unit test the kernel on the host
-- Use Rust language features to ensure memory and thread safety at compile time
+- Clearly separate platform (port) specific code from the kernel
 
 ## User Guide
 
 ### Architecture
 
-The [`rucos`](kernel) crate is a collection of `no_std` data structures. It has
-no platform specific or `unsafe` code. The `Kernel` struct is designed to be
-used as a singleton in an embedded application.
-
-The `rucos` crate would be difficult to use alone, as the embedded application
-needs a mutable reference to the `Kernel` singleton in every task. This is
-where the "port specific" crate comes in (e.g. [`rucos-cortex-m`](cortex-m)).
-The port specific crate creates wrappers around the `Kernel` APIs, dealing with
-platform specific details (e.g. stack initialization) and handling the `Kernel`
-singleton in a safe way (e.g. disabling interrupts).
+`rucos` is a collection of `no_std` functions and data structures, with a small
+amount of platform specific code located in the [`port/`](src/port) directory.
 
 ### Getting Started
 
-Using RuCOS is as simple as adding the port specific crate to `Cargo.toml` and
-calling a few APIs.
+Using `rucos` is as simple as adding the crate to your project and calling a few APIs:
 
 ```rust
-use rucos_cortex_m as rucos;
+use rucos;
+
+// ID = 42, Priority = 0 (highest priority)
+static MY_TASK: rucos::Task = rucos::Task::new(42, 0);
 
 let my_task = |_: u32| -> ! {
     loop {
@@ -48,36 +40,29 @@ let mut idle_stack: [u8; IDLE_STACK_SIZE] = [0; IDLE_STACK_SIZE];
 let mut my_task_stack: [u8; TASK_STACK_SIZE] = [0; TASK_STACK_SIZE];
 
 rucos::init(&mut idle_stack, None);
-rucos::create(0, 10, &mut my_task_stack, my_task, None);
+rucos::create(&MY_TASK, &mut my_task_stack, my_task, None);
 rucos::start(...);
 ```
+
+See the [`examples`](examples/) directory for more details.
 
 ## Developer Guide
 
 ### Dependencies
 
-* To build `rucos` and `rucos-cortex-m`, the Rust toolchain is required
-* To run the `rucos-cortex-m` examples, [`probe-rs`](https://probe.rs/) is required
-* To debug the `rucos-cortex-m` examples, the `probe-rs` VS Code extension is required
+* Building: Rust toolchain
+* Running examples: [`probe-rs`](https://probe.rs/)
+* Debugging examples: [`probe-rs`](https://probe.rs/) VS Code extension
 
 ### Building
 
-    ./build_all
+    cargo build
 
 ### Testing
 
-#### [`rucos`](kernel/)
+Testing `rucos` requires targeting a particular device. The STM32F767 MCU
+is used as the test platform, but the examples should be easy to port to
+other devices.
 
-    cd kernel && cargo test
-
-#### [`rucos-cortex-m`](cortex-m)
-
-Testing `rucos-cortex-m` requires targeting a particular device. The STM32F767
-microcontroller is used as the test platform, but note that the example code
-should be easily portable to other devices.
-
-Ideally `cargo test` would be used to automate target testing via `defmt-test`,
-but the nature of RuCOS applications is that they do not terminate and or follow
-a serial sequence of steps we can assert on. Instead [`examples`](cortex-m/examples/) are used for testing and each one must be run manually:
-
-    cd cortex-m && cargo run --example <name>
+    cargo run --example task_basic
+    cargo run --example task_advanced

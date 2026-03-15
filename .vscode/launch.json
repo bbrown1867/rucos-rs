@@ -5,7 +5,7 @@
             "type": "probe-rs-debug",
             "request": "launch",
             "name": "Debug",
-            "cwd": "${workspaceFolder}/cortex-m",
+            "cwd": "${workspaceFolder}",
             "speed": 1800,
             "probe": "0483:374b",
             "runtimeExecutable": "probe-rs",

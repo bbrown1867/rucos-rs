@@ -10,24 +10,20 @@ real-time kernel for embedded Rust applications (`no_std`).
 - Do not use the `async`/`await` pattern
 - Do not require memory management or protection hardware
 - Do not use experimental language features: Compile on `stable`
-- Portable: Clearly separate platform specific code from the kernel
+- Portable: Clearly separate platform specific and generic code
 - Tested: Thanks to portability, we can unit test the kernel on the host
-- Use Rust language features to ensure memory and thread safety at compile time
 
 ## User Guide
 
 ### Architecture
 
-The [`rucos`](kernel) crate is a collection of `no_std` data structures. It has
-no platform specific or `unsafe` code. The `Kernel` struct is designed to be
-used as a singleton in an embedded application.
-
-The `rucos` crate would be difficult to use alone, as the embedded application
-needs a mutable reference to the `Kernel` singleton in every task. This is
-where the "port specific" crate comes in (e.g. [`rucos-cortex-m`](cortex-m)).
-The port specific crate creates wrappers around the `Kernel` APIs, dealing with
-platform specific details (e.g. stack initialization) and handling the `Kernel`
-singleton in a safe way (e.g. disabling interrupts).
+The [`rucos`](kernel) crate is a collection of `no_std` data structures and
+a very simple scheduler. It has no platform specific code or and almost no
+`unsafe` code. Aside to the `Task` data strcuture, the `rucos` crate is not
+designed to be directly used by end users. Instead, a "port specific" crate,
+like [`rucos-cortex-m`](cortex-m) should be used. The port specific crate
+handles architecture details like stack initialization and context switching,
+and ensures scheduling is done in a safely (e.g. disabling interrupts).
 
 ### Getting Started
 
@@ -37,18 +33,21 @@ calling a few APIs.
 ```rust
 use rucos_cortex_m as rucos;
 
+// ID = 6, Priority = 0 (highest priority)
+static MY_TASK: rucos::Task = rucos::Task::new(6, 0);
+
 let my_task = |_: u32| -> ! {
     loop {
         info!("Hello from Task {}", rucos::get_current_task());
-        rucos::sleep(rucos::TICK_RATE_HZ);
+        rucos::sleep(TICK_RATE_HZ);
     }
 };
 
-let mut idle_stack: [u8; IDLE_STACK_SIZE] = [0; IDLE_STACK_SIZE];
-let mut my_task_stack: [u8; TASK_STACK_SIZE] = [0; TASK_STACK_SIZE];
+let idle_stack: [u8; IDLE_STACK_SIZE] = [0; IDLE_STACK_SIZE];
+let my_task_stack: [u8; TASK_STACK_SIZE] = [0; TASK_STACK_SIZE];
 
-rucos::init(&mut idle_stack, None);
-rucos::create(0, 10, &mut my_task_stack, my_task, None);
+rucos::init(&idle_stack, None);
+rucos::create(&MY_TASK, &my_task_stack, my_task, None);
 rucos::start(...);
 ```
 

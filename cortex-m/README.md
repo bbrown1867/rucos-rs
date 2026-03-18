@@ -152,20 +152,6 @@ has two issues with respect to the current design of `rucos-cortex-m`:
 
 #### Solution Ideas
 
-- Move `KERNEL` to the application
-    - Gives flexibility for memory placement
-    - `init()` and `start()` can be passed a mutable reference
-- Update kernel APIs to use `svc` instruction
-    - Acts as a function call into the kernel
-    - Does not require accessing the singleton
-- Make two versions of `create()`: Before and after kernel start
-    - Before kernel start: Pass in a mutable reference to kernel
-    - After kernel start: Using `svc` instruction, like other kernel APIs
-- Interrupts (SysTick, PendSV, SVCall):
-    - Likely need to bind pointer to `KERNEL` in `start()` for ISRs
-    - Initial implementation can disable interrupts (`Mutex<RefCell<T>>` pattern)
-    - Then need to think more about atomics and other primitives
-- Could `Kernel` struct be lighterweight?
-    - Each task could have a reference to it's own "TCB" (`Task` struct)
-    - Does a linked-list implementation avoid needing a `Vec`?
-    - Kernel could use `Atomic` data types for other state (`core::sync::atomic`)
+Refactor to avoid needing `KERNEL` singleton that needs to be mutated. Instead
+use `static` variables that are `Atomic` (`core::sync::atomic`). The PendSV ISR
+will continue to run with interrupts disabled to perform a context switch.

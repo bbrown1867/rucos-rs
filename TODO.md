@@ -3,15 +3,14 @@
 ## Features
 
 - [x] Implement multi-tasking
+- [ ] Implement inter-task communication
 - [ ] Implement synchronization primitives
-- [ ] Implement static memory pools with `Drop` trait
-- [ ] Implement inter-task communication with `Send` and `Sync` traits
-- [ ] Support time slicing if tasks with the same priority are ready
+- [ ] Implement time slicing for tasks with the same priority
 
 ## Ports
 
-- [x] Create a `cortex-m` port
-- [ ] Create a `risc-v` port
+- [x] Create `cortex-m` port
+- [ ] Create `risc-v` port
 
 ## Infrastructure
 

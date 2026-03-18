@@ -1,481 +1,284 @@
-//! RuCOS kernel
+//! RuCOS Kernel
+//!
+//! This module should only be used by the "port specific" crate (e.g. `rucos-cortex-m`).
 
-use crate::task::{Task, TaskPendReason, TaskState};
-use core::cmp::PartialOrd;
-use core::default::Default;
-use core::fmt::Debug;
-use core::marker::Copy;
-use core::ops::{Add, AddAssign};
-use heapless::Vec;
+use core::ptr::null_mut;
+use core::sync::atomic::{AtomicPtr, AtomicU32, AtomicUsize, Ordering};
 
-/// Kernel
-///
-/// # Generics
-///
-/// * `SP`: The stack pointer type
-/// * `TICK`: The kernel time data type, usually a numeric type
-/// * `MAX_NUM_TASKS`: Upper bound on the number of tasks for the kernel
-pub struct Kernel<SP, TICK, const MAX_NUM_TASKS: usize> {
-    /// Kernel state
-    is_running: bool,
-    /// Global tick counter
-    tick_counter: TICK,
-    /// Task list
-    task_list: Vec<Task<SP, TICK>, MAX_NUM_TASKS>,
-    /// Current task ID
-    curr_task_id: Option<usize>,
-    /// Next task ID
-    next_task_id: Option<usize>,
+use crate::task::Task;
+
+// TODO: Somehow allow user to configure this
+const MAX_NUM_TASKS: usize = 32;
+
+static CURR_TICK: AtomicU32 = AtomicU32::new(0);
+static WAKE_TICK: AtomicU32 = AtomicU32::new(0);
+static CURR_TASK: AtomicUsize = AtomicUsize::new(MAX_NUM_TASKS);
+static IDLE_TASK: Task = Task::new(MAX_NUM_TASKS, u8::MAX);
+static TASK_TABLE: [AtomicPtr<Task>; MAX_NUM_TASKS] =
+    [const { AtomicPtr::new(null_mut()) }; MAX_NUM_TASKS];
+
+fn get_task(id: usize) -> Option<&'static Task> {
+    assert!(id <= MAX_NUM_TASKS, "Invalid task");
+
+    if id == MAX_NUM_TASKS {
+        return Some(&IDLE_TASK);
+    }
+
+    let task = TASK_TABLE[id].load(Ordering::Relaxed);
+    if task.is_null() {
+        None
+    } else {
+        // Safety: Safe dereference, since we verified the pointer is not null
+        unsafe { Some(&*TASK_TABLE[id].load(Ordering::Relaxed)) }
+    }
 }
 
-impl<SP, TICK, const MAX_NUM_TASKS: usize> Kernel<SP, TICK, MAX_NUM_TASKS>
-where
-    SP: Copy + Debug,
-    TICK: Add<Output = TICK> + AddAssign + Copy + Debug + Default + PartialOrd,
-{
-    /// Initialize the kernel
-    pub fn new() -> Self {
-        Self {
-            is_running: false,
-            tick_counter: TICK::default(),
-            task_list: Vec::new(),
-            curr_task_id: None,
-            next_task_id: None,
-        }
+/// Initialize the kernel
+///
+/// # Arguments
+///
+/// * `idle_stack_ptr`: Idle task stack pointer
+pub fn init(idle_stack_ptr: u32) {
+    IDLE_TASK.stack_ptr.store(idle_stack_ptr, Ordering::Relaxed);
+}
+
+/// Create a task
+///
+/// # Arguments
+///
+/// * `task`: Task control block
+/// * `task_stack_ptr`: Task stack pointer
+pub fn create(task: &'static Task, task_stack_ptr: u32) {
+    assert!(task.id < MAX_NUM_TASKS, "Invalid task");
+
+    task.stack_ptr.store(task_stack_ptr, Ordering::Relaxed);
+    TASK_TABLE[task.id].store(task as *const _ as *mut _, Ordering::Relaxed);
+}
+
+/// Delete a task
+///
+/// # Arguments
+///
+/// * `id`: Task to delete
+///
+/// # Returns
+///
+/// `true` if a context switch is needed, `false` otherwise
+pub fn delete(id: usize) -> bool {
+    assert!(id < MAX_NUM_TASKS, "Invalid task");
+
+    let task = get_task(id).expect("Task does not exist");
+    let is_current_task = task == get_current_task().unwrap();
+    TASK_TABLE[id].store(null_mut(), Ordering::Relaxed);
+
+    is_current_task
+}
+
+/// Get the current task
+///
+/// # Returns
+///
+/// Reference to current task or `None` if the current task was deleted
+///
+/// # Note
+///
+/// If the kernel has not been started, the idle task is returned
+pub fn get_current_task() -> Option<&'static Task> {
+    let id = CURR_TASK.load(Ordering::Relaxed);
+    if id >= MAX_NUM_TASKS {
+        Some(&IDLE_TASK)
+    } else {
+        get_task(id)
     }
+}
 
-    /// Start the kernel
-    ///
-    /// # Returns
-    ///
-    /// Stack pointer for the first task to run
-    ///
-    /// # Panics
-    ///
-    /// * No tasks have been created
-    /// * The kernel is already running
-    pub fn start(&mut self) -> SP {
-        assert!(!self.is_running, "Kernel already running");
+/// Get the system tick
+///
+/// # Returns
+///
+/// Current value of the system tick
+pub fn get_current_tick() -> u32 {
+    CURR_TICK.load(Ordering::Relaxed)
+}
 
-        self.is_running = true;
+/// Sleep the current task
+///
+/// # Arguments
+///
+/// * `delay`: Number of ticks to sleep
+///
+/// # Returns
+///
+/// `true` if a context switch is needed, `false` otherwise
+pub fn sleep(delay: u32) -> bool {
+    if delay > 0 {
+        let curr_task = get_current_task().unwrap();
+        let curr_tick = get_current_tick();
+        let wake_tick = curr_tick + delay;
+        curr_task.sleep(wake_tick);
 
-        if self.scheduler() == true {
-            self.handle_context_switch(None)
-        } else {
-            panic!("No tasks created")
-        }
-    }
-
-    /// Create a task
-    ///
-    /// # Arguments
-    ///
-    /// * `id`: Task ID
-    /// * `priority`: Task priority, with a lower number meaning higher priority
-    /// * `stack_ptr`: Task stack pointer
-    ///
-    /// # Returns
-    ///
-    /// `true` if a context switch is needed, `false` if not
-    ///
-    /// # Panics
-    ///
-    /// * The task `id` is not unique
-    /// * Too many tasks have been created, more than `MAX_NUM_TASKS`
-    ///
-    /// # Note
-    ///
-    /// The kernel does not manage the task stack, caller is responsible for
-    /// allocation and initialization of stack memory
-    pub fn create(&mut self, id: usize, priority: usize, stack_ptr: SP) -> bool {
-        // Ensure the task ID is unique
-        for task in self.task_list.iter() {
-            assert!(task.id != id, "The task ID is not unique");
-        }
-
-        self.task_list
-            .push(Task {
-                id,
-                priority,
-                stack_ptr,
-                state: TaskState::Ready,
-                pend: TaskPendReason::NotPending,
-            })
-            .expect("Number of tasks exceeds MAX_NUM_TASKS");
-
-        self.scheduler()
-    }
-
-    /// Delete a task
-    ///
-    /// # Arguments
-    ///
-    /// * `id`: Task to delete or `None` to delete the current task
-    ///
-    /// # Returns
-    ///
-    /// `true` if a context switch is needed, `false` if not
-    ///
-    /// # Panics
-    ///
-    /// * The `id` provided does not correspond to a task
-    /// * If called before the kernel is running
-    pub fn delete(&mut self, id: Option<usize>) -> bool {
-        let curr_task_idx = self.find_task_idx(self.curr_task_id.expect("Kernel not running"));
-        let task_idx = match id {
-            Some(id) => self.find_task_idx(id),
-            None => curr_task_idx,
-        };
-
-        self.task_list.remove(task_idx);
-
-        if curr_task_idx == task_idx {
-            self.curr_task_id = None;
+        let next_tick = WAKE_TICK.load(Ordering::Relaxed);
+        if next_tick < curr_tick || next_tick > wake_tick {
+            WAKE_TICK.store(wake_tick, Ordering::Relaxed);
         }
 
-        self.scheduler()
+        return true;
     }
 
-    /// Get the ID of the current task
-    ///
-    /// # Returns
-    ///
-    /// ID of the current task
-    ///
-    /// # Panics
-    ///
-    /// If called before the kernel is running
-    pub fn get_current_task(&self) -> usize {
-        self.curr_task_id.expect("Kernel not running")
-    }
+    false
+}
 
-    /// Get the value of the global tick counter
-    ///
-    /// # Returns
-    ///
-    /// Current value of the global tick counter
-    pub fn get_current_tick(&self) -> TICK {
-        self.tick_counter
-    }
+/// Suspend a task
+///
+/// # Arguments
+///
+/// * `id`: Task to suspend
+///
+/// # Returns
+///
+/// `true` if a context switch is needed, `false` otherwise
+pub fn suspend(id: usize) -> bool {
+    let task = get_task(id).expect("Task does not exist");
+    task.suspend();
+    task == get_current_task().unwrap()
+}
 
-    /// Sleep the current task
-    ///
-    /// # Arguments
-    ///
-    /// * `delay`: Number of ticks to sleep
-    ///
-    /// # Returns
-    ///
-    /// `true` if a context switch is needed, `false` if not
-    ///
-    /// # Panics
-    ///
-    /// If called before the kernel is running
-    pub fn sleep(&mut self, delay: TICK) -> bool {
-        let new_tick_counter = self.tick_counter + delay;
-        let curr_task = self.find_task(self.curr_task_id.expect("Kernel not running"));
+/// Resume a task
+///
+/// # Arguments
+///
+/// * `id`: Task to resume
+pub fn resume(id: usize) {
+    let task = get_task(id).expect("Task does not exist");
+    task.ready();
+}
 
-        curr_task.state = TaskState::Pending;
-        curr_task.pend = TaskPendReason::Sleep(new_tick_counter);
+/// Run the scheduler
+///
+/// # Arguments
+///
+/// * `curr_task_stack_ptr`: Updated stack pointer for the current task
+///
+/// # Returns
+///
+/// Stack pointer for the next task
+///
+/// # Note
+///
+/// This function should be run atomically (e.g. interrupts disabled)
+pub fn run_scheduler(curr_task_stack_ptr: u32) -> u32 {
+    let curr_task = get_current_task();
+    let curr_tick = get_current_tick();
 
-        self.scheduler()
-    }
+    // Update current task stack pointer
+    match curr_task {
+        Some(task) => task.stack_ptr.store(curr_task_stack_ptr, Ordering::Relaxed),
+        // Current task was deleted
+        None => (),
+    };
 
-    /// Suspend a task
-    ///
-    /// # Arguments
-    ///
-    /// * `id`: Task to suspend or `None` to suspend the current task
-    ///
-    /// # Returns
-    ///
-    /// `true` if a context switch is needed, `false` if not
-    ///
-    /// # Panics
-    ///
-    /// * The `id` provided does not correspond to a task
-    /// * If called before the kernel is running
-    pub fn suspend(&mut self, id: Option<usize>) -> bool {
-        let task: &mut Task<SP, TICK> = match id {
-            Some(id) => self.find_task(id),
-            None => {
-                let curr_task_id = self.curr_task_id.expect("Kernel not running");
-                self.find_task(curr_task_id)
-            }
-        };
+    // Idle task is always ready to run
+    let mut next_task = &IDLE_TASK;
 
-        task.state = TaskState::Pending;
-        task.pend = TaskPendReason::Suspended;
+    // Find the highest priority task ready to run
+    // TODO: Add time slicing (round-robin) if multiple tasks with the same priority are ready
+    for i in 0..MAX_NUM_TASKS {
+        match get_task(i) {
+            Some(task) => {
+                if task.is_sleep() && task.wake_tick() <= curr_tick {
+                    task.ready();
+                }
 
-        self.scheduler()
-    }
-
-    /// Resume a task
-    ///
-    /// # Arguments
-    ///
-    /// * `id`: Task to resume
-    ///
-    /// # Returns
-    ///
-    /// `true` if a context switch is needed, `false` if not
-    ///
-    /// # Panics
-    ///
-    /// The `id` provided does not correspond to a task
-    pub fn resume(&mut self, id: usize) -> bool {
-        let task: &mut Task<SP, TICK> = self.find_task(id);
-
-        task.state = TaskState::Ready;
-        task.pend = TaskPendReason::NotPending;
-
-        self.scheduler()
-    }
-
-    /// Update the global tick counter
-    ///
-    /// # Arguments
-    ///
-    /// * `elapsed`: Number of ticks that have passed since last call
-    ///
-    /// # Returns
-    ///
-    /// `true` if a context switch is needed, `false` if not
-    pub fn tick_update(&mut self, elapsed: TICK) -> bool {
-        self.tick_counter += elapsed;
-
-        self.scheduler()
-    }
-
-    /// Handle a context switch
-    ///
-    /// # Arguments
-    ///
-    /// * `updated_stack_ptr`: The updated stack pointer for the current task or
-    ///   `None` if there is no current task
-    ///
-    /// # Returns
-    ///
-    /// The stack pointer for the next task
-    ///
-    /// # Panics
-    ///
-    /// If called when a context switch is not necessary
-    pub fn handle_context_switch(&mut self, updated_stack_ptr: Option<SP>) -> SP {
-        // Update current task
-        match self.curr_task_id {
-            Some(curr_task_id) => {
-                let curr_task = self.find_task(curr_task_id);
-
-                match updated_stack_ptr {
-                    Some(sp) => curr_task.stack_ptr = sp,
-                    None => (),
-                };
-
-                curr_task.state = match curr_task.state {
-                    TaskState::Running => TaskState::Ready,
-                    _ => curr_task.state,
-                };
+                // Remember: Lower value means higher priority
+                if task.is_ready() && task.priority < next_task.priority {
+                    next_task = task;
+                }
             }
             None => (),
         }
-
-        // Update kernel
-        let next_task_id = self.next_task_id.expect("No context switch required");
-        self.curr_task_id = Some(next_task_id);
-        self.next_task_id = None;
-
-        // Update next task
-        let next_task = self.find_task(next_task_id);
-        next_task.state = TaskState::Running;
-
-        // Return the next task stack pointer
-        next_task.stack_ptr
     }
 
-    fn scheduler(&mut self) -> bool {
-        if !self.is_running {
-            return false;
-        }
-
-        // Update pending tasks, as they might be ready to run now
-        self.update_pending_tasks();
-
-        // Update next task to run
-        match self.find_highest_priority_runnable_task() {
-            Some(next_task_id) => {
-                match self.curr_task_id {
-                    Some(curr_task_id) => {
-                        // Case 1: Current task should continue running
-                        if curr_task_id == next_task_id {
-                            self.next_task_id = None;
-                        // Case 2: Current task should be switched out
-                        } else {
-                            self.next_task_id = Some(next_task_id);
-                        }
-                    }
-                    // Case 3: There is no current task (starting the kernel)
-                    None => self.next_task_id = Some(next_task_id),
-                }
-            }
-            // All tasks pending, nothing to do
-            None => self.next_task_id = None,
-        }
-
-        !(self.next_task_id == None)
+    if curr_task.is_none() || next_task != curr_task.unwrap() {
+        CURR_TASK.store(next_task.id, Ordering::Relaxed);
+        next_task.stack_ptr.load(Ordering::Relaxed)
+    } else {
+        curr_task_stack_ptr
     }
+}
 
-    fn update_pending_tasks(&mut self) {
-        for task in self.task_list.iter_mut() {
-            match task.pend {
-                TaskPendReason::Sleep(timeout) => {
-                    if self.tick_counter >= timeout {
-                        task.state = TaskState::Ready;
-                        task.pend = TaskPendReason::NotPending;
-                    }
-                }
-                _ => (),
-            }
-        }
-    }
-
-    // TODO: Assumes only one task per priority level, no time slicing
-    fn find_highest_priority_runnable_task(&self) -> Option<usize> {
-        let mut highest_prio_runnable_task: Option<&Task<SP, TICK>> = None;
-        for task in self.task_list.iter() {
-            if task.is_runnable() {
-                highest_prio_runnable_task = match highest_prio_runnable_task {
-                    Some(other) => {
-                        if task < other {
-                            Some(task)
-                        } else {
-                            Some(other)
-                        }
-                    }
-                    None => Some(task),
-                };
-            }
-        }
-
-        match highest_prio_runnable_task {
-            Some(task) => Some(task.id),
-            None => None,
-        }
-    }
-
-    fn find_task(&mut self, id: usize) -> &mut Task<SP, TICK> {
-        self.task_list
-            .iter_mut()
-            .find(|t| t.id == id)
-            .expect("Task does not exist")
-    }
-
-    fn find_task_idx(&self, id: usize) -> usize {
-        self.task_list
-            .iter()
-            .position(|t| t.id == id)
-            .expect("Task does not exist")
-    }
+/// Update the system tick
+///
+/// # Arguments
+///
+/// * `elapsed`: Number of ticks elapsed since last call
+///
+/// # Returns
+///
+/// `true` if a context switch is needed, `false` otherwise
+pub fn update_tick(elapsed: u32) -> bool {
+    let curr_tick = CURR_TICK.fetch_add(elapsed, Ordering::Relaxed) + elapsed;
+    let wake_tick = WAKE_TICK.load(Ordering::Relaxed);
+    wake_tick <= curr_tick
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn setup() -> Kernel<u32, u64, 2> {
-        let mut kernel = Kernel::new();
+    static TASK0: Task = Task::new(0, 10);
+    static TASK1: Task = Task::new(1, 11);
+    static TASK2: Task = Task::new(2, 12);
 
-        let mut task0_stack: [u8; 128] = [0; 128];
-        kernel.create(0, 99, task0_stack.as_mut_ptr() as u32);
+    #[test]
+    fn test_create() {
+        create(&TASK0, 0xDEADBEEF);
+        create(&TASK1, 0xDEADBEEF);
+        create(&TASK2, 0xDEADBEEF);
 
-        let mut task1_stack: [u8; 128] = [0; 128];
-        kernel.create(1, 100, task1_stack.as_mut_ptr() as u32);
-
-        kernel.start();
-        assert_eq!(kernel.curr_task_id, Some(0));
-        assert_eq!(kernel.next_task_id, None);
-        assert_eq!(kernel.get_current_task(), 0);
-
-        kernel
+        assert_eq!(get_task(0).unwrap(), &TASK0);
+        assert_eq!(get_task(1).unwrap(), &TASK1);
+        assert_eq!(get_task(2).unwrap(), &TASK2);
+        assert_eq!(get_task(3), None);
     }
 
     #[test]
-    fn test_sleep() {
-        let mut kernel = setup();
-
-        assert_eq!(kernel.sleep(2), true);
-        assert_eq!(kernel.curr_task_id, Some(0));
-        assert_eq!(kernel.next_task_id, Some(1));
-
-        let _ = kernel.handle_context_switch(None);
-
-        assert_eq!(kernel.curr_task_id, Some(1));
-        assert_eq!(kernel.next_task_id, None);
-        assert_eq!(kernel.get_current_task(), 1);
-
-        assert_eq!(kernel.tick_update(3), true);
-        assert_eq!(kernel.get_current_tick(), 3);
-        assert_eq!(kernel.curr_task_id, Some(1));
-        assert_eq!(kernel.next_task_id, Some(0));
+    fn test_delete() {
+        create(&TASK0, 0xDEADBEEF);
+        assert_eq!(delete(0), false);
+        assert_eq!(get_task(0), None);
     }
 
     #[test]
-    fn test_suspend_current_task() {
-        let mut kernel = setup();
-
-        assert_eq!(kernel.suspend(None), true);
-        assert_eq!(kernel.curr_task_id, Some(0));
-        assert_eq!(kernel.next_task_id, Some(1));
+    fn test_suspend_and_resume() {
+        create(&TASK0, 0xDEADBEEF);
+        assert_eq!(suspend(0), false);
+        assert!(TASK0.is_suspended());
+        resume(0);
+        assert!(TASK0.is_ready())
     }
 
     #[test]
-    fn test_suspend_other_task() {
-        let mut kernel = setup();
+    fn test_run_scheduler() {
+        let task0_stack_ptr = 0xAA;
+        let task1_stack_ptr = 0xBB;
+        let task2_stack_ptr = 0xCC;
+        create(&TASK0, task0_stack_ptr);
+        create(&TASK1, task1_stack_ptr);
+        create(&TASK2, task2_stack_ptr);
 
-        assert_eq!(kernel.suspend(Some(1)), false);
-        assert_eq!(kernel.curr_task_id, Some(0));
-        assert_eq!(kernel.next_task_id, None);
+        assert_eq!(run_scheduler(task0_stack_ptr), task0_stack_ptr);
+        assert_eq!(get_current_task(), Some(&TASK0));
+        TASK0.sleep(5);
+        assert_eq!(run_scheduler(task0_stack_ptr), task1_stack_ptr);
+        assert_eq!(get_current_task(), Some(&TASK1));
+        TASK1.sleep(5);
+        assert_eq!(run_scheduler(task1_stack_ptr), task2_stack_ptr);
+        assert_eq!(get_current_task(), Some(&TASK2));
     }
 
     #[test]
-    fn test_resume() {
-        let mut kernel = setup();
-
-        let _ = kernel.suspend(None);
-        let _ = kernel.handle_context_switch(None);
-
-        assert_eq!(kernel.resume(0), true);
-        assert_eq!(kernel.curr_task_id, Some(1));
-        assert_eq!(kernel.next_task_id, Some(0));
-    }
-
-    #[test]
-    fn test_delete_current_task() {
-        let mut kernel = setup();
-
-        assert_eq!(kernel.delete(None), true);
-        assert_eq!(kernel.curr_task_id, None);
-        assert_eq!(kernel.next_task_id, Some(1));
-    }
-
-    #[test]
-    fn test_delete_current_task_by_id() {
-        let mut kernel = setup();
-
-        assert_eq!(kernel.delete(Some(0)), true);
-        assert_eq!(kernel.curr_task_id, None);
-        assert_eq!(kernel.next_task_id, Some(1));
-    }
-
-    #[test]
-    fn test_delete_other_task() {
-        let mut kernel = setup();
-
-        let _ = kernel.suspend(None);
-        let _ = kernel.handle_context_switch(None);
-
-        assert_eq!(kernel.delete(Some(0)), false);
-        assert_eq!(kernel.curr_task_id, Some(1));
-        assert_eq!(kernel.next_task_id, None);
+    fn test_update_tick() {
+        update_tick(3);
+        assert_eq!(get_current_tick(), 3);
     }
 }

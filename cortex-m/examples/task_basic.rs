@@ -9,13 +9,13 @@ mod common;
 use defmt::info;
 use rucos_cortex_m as rucos;
 
-fn task_template(arg: u32) -> ! {
-    let delay: u64 = arg as u64;
-    assert!(delay > 0);
+static TASK0: rucos::Task = rucos::Task::new(common::TASK0_ID, common::TASK0_PRIO);
+static TASK1: rucos::Task = rucos::Task::new(common::TASK1_ID, common::TASK1_PRIO);
 
+fn task_template(delay_sec: u32) -> ! {
     loop {
         info!("Hello from Task {}", rucos::get_current_task());
-        rucos::sleep(delay * rucos::TICK_RATE_HZ);
+        rucos::sleep(delay_sec * common::TICK_RATE_HZ);
     }
 }
 
@@ -23,21 +23,22 @@ fn task_template(arg: u32) -> ! {
 fn main() -> ! {
     let mut resources = common::setup();
 
-    let mut idle_stack: [u8; common::IDLE_STACK_SIZE] = [0; common::IDLE_STACK_SIZE];
-    rucos::init(&mut idle_stack, None);
+    let idle_stack: [u8; common::IDLE_STACK_SIZE] = [0; common::IDLE_STACK_SIZE];
+    rucos::init(&idle_stack, None);
 
     info!("Creating Task 0");
-    let mut task0_stack: [u8; common::TASK_STACK_SIZE] = [0; common::TASK_STACK_SIZE];
-    rucos::create(0, 0, &mut task0_stack, task_template, Some(2));
+    let task0_stack: [u8; common::TASK_STACK_SIZE] = [0; common::TASK_STACK_SIZE];
+    rucos::create(&TASK0, &task0_stack, task_template, Some(2));
 
     info!("Creating Task 1");
-    let mut task1_stack: [u8; common::TASK_STACK_SIZE] = [0; common::TASK_STACK_SIZE];
-    rucos::create(1, 1, &mut task1_stack, task_template, Some(1));
+    let task1_stack: [u8; common::TASK_STACK_SIZE] = [0; common::TASK_STACK_SIZE];
+    rucos::create(&TASK1, &task1_stack, task_template, Some(1));
 
     info!("Starting");
     rucos::start(
         &mut resources.scb,
         &mut resources.systick,
         resources.clocks.hclk().to_Hz(),
+        common::TICK_RATE_HZ,
     );
 }

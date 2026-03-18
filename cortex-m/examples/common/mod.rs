@@ -5,11 +5,18 @@ use rucos_cortex_m as rucos;
 use stm32f7xx_hal::rcc::Clocks;
 use stm32f7xx_hal::{pac, prelude::*};
 
+pub const TICK_RATE_HZ: u32 = 1000;
+
 pub const IDLE_STACK_SIZE: usize = 256;
-pub const TASK_STACK_SIZE: usize = 2048;
+pub const TASK_STACK_SIZE: usize = 512;
+
+pub const TASK0_ID: usize = 0;
+pub const TASK1_ID: usize = 1;
+pub const TASK0_PRIO: u8 = 10;
+pub const TASK1_PRIO: u8 = 11;
 
 // NOTE: Kernel must be initialized before using defmt macros
-defmt::timestamp!("{=u64:us}", rucos::get_current_tick());
+defmt::timestamp!("{=u32:ms}", rucos::get_current_tick());
 
 pub struct KernelResources {
     pub scb: SCB,

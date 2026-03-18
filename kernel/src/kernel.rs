@@ -11,7 +11,7 @@ use crate::task::Task;
 const MAX_NUM_TASKS: usize = 32;
 
 static CURR_TICK: AtomicU32 = AtomicU32::new(0);
-static WAKE_TICK: AtomicU32 = AtomicU32::new(u32::MAX);
+static WAKE_TICK: AtomicU32 = AtomicU32::new(0);
 static CURR_TASK: AtomicUsize = AtomicUsize::new(MAX_NUM_TASKS);
 static IDLE_TASK: Task = Task::new(MAX_NUM_TASKS, u8::MAX);
 static TASK_TABLE: [AtomicPtr<Task>; MAX_NUM_TASKS] =

@@ -11,7 +11,7 @@ use crate::task::Task;
 const MAX_NUM_TASKS: usize = 32;
 
 static CURR_TICK: AtomicU32 = AtomicU32::new(0);
-static WAKE_TICK: AtomicU32 = AtomicU32::new(0);
+static WAKE_TICK: AtomicU32 = AtomicU32::new(u32::MAX);
 static CURR_TASK: AtomicUsize = AtomicUsize::new(MAX_NUM_TASKS);
 static IDLE_TASK: Task = Task::new(MAX_NUM_TASKS, u8::MAX);
 static TASK_TABLE: [AtomicPtr<Task>; MAX_NUM_TASKS] =
@@ -82,7 +82,7 @@ pub fn delete(id: usize) -> bool {
 ///
 /// # Note
 ///
-/// If the kernel has not been started, the idle task is returned
+/// If the kernel has not been started, the idle task is returned.
 pub fn get_current_task() -> Option<&'static Task> {
     let id = CURR_TASK.load(Ordering::Relaxed);
     if id >= MAX_NUM_TASKS {
@@ -106,26 +106,11 @@ pub fn get_current_tick() -> u32 {
 /// # Arguments
 ///
 /// * `delay`: Number of ticks to sleep
-///
-/// # Returns
-///
-/// `true` if a context switch is needed, `false` otherwise
-pub fn sleep(delay: u32) -> bool {
-    if delay > 0 {
-        let curr_task = get_current_task().unwrap();
-        let curr_tick = get_current_tick();
-        let wake_tick = curr_tick + delay;
-        curr_task.sleep(wake_tick);
+pub fn sleep(delay: u32) {
+    assert!(delay > 0, "Delay must be non-zero");
 
-        let next_tick = WAKE_TICK.load(Ordering::Relaxed);
-        if next_tick < curr_tick || next_tick > wake_tick {
-            WAKE_TICK.store(wake_tick, Ordering::Relaxed);
-        }
-
-        return true;
-    }
-
-    false
+    let curr_task = get_current_task().unwrap();
+    curr_task.sleep(get_current_tick() + delay);
 }
 
 /// Suspend a task
@@ -165,7 +150,7 @@ pub fn resume(id: usize) {
 ///
 /// # Note
 ///
-/// This function should be run atomically (e.g. interrupts disabled)
+/// This function should be run atomically (e.g. with interrupts disabled).
 pub fn run_scheduler(curr_task_stack_ptr: u32) -> u32 {
     let curr_task = get_current_task();
     let curr_tick = get_current_tick();
@@ -180,13 +165,20 @@ pub fn run_scheduler(curr_task_stack_ptr: u32) -> u32 {
     // Idle task is always ready to run
     let mut next_task = &IDLE_TASK;
 
+    let mut min_wake_tick = u32::MAX;
+
     // Find the highest priority task ready to run
     // TODO: Add time slicing (round-robin) if multiple tasks with the same priority are ready
     for i in 0..MAX_NUM_TASKS {
         match get_task(i) {
             Some(task) => {
-                if task.is_sleep() && task.wake_tick() <= curr_tick {
-                    task.ready();
+                if task.is_sleep() {
+                    let task_wake_tick = task.wake_tick();
+                    if task_wake_tick <= curr_tick {
+                        task.ready();
+                    } else if task_wake_tick < min_wake_tick {
+                        min_wake_tick = task_wake_tick;
+                    }
                 }
 
                 // Remember: Lower value means higher priority
@@ -197,6 +189,8 @@ pub fn run_scheduler(curr_task_stack_ptr: u32) -> u32 {
             None => (),
         }
     }
+
+    WAKE_TICK.store(min_wake_tick, Ordering::Relaxed);
 
     if curr_task.is_none() || next_task != curr_task.unwrap() {
         CURR_TASK.store(next_task.id, Ordering::Relaxed);
@@ -229,11 +223,19 @@ mod tests {
     static TASK1: Task = Task::new(1, 11);
     static TASK2: Task = Task::new(2, 12);
 
-    #[test]
+    const IDLE_SP: u32 = 255;
+    const TASK0_SP: u32 = 0;
+    const TASK1_SP: u32 = 1;
+    const TASK2_SP: u32 = 2;
+
+    fn test_init() {
+        init(IDLE_SP);
+    }
+
     fn test_create() {
-        create(&TASK0, 0xDEADBEEF);
-        create(&TASK1, 0xDEADBEEF);
-        create(&TASK2, 0xDEADBEEF);
+        create(&TASK0, TASK0_SP);
+        create(&TASK1, TASK1_SP);
+        create(&TASK2, TASK2_SP);
 
         assert_eq!(get_task(0).unwrap(), &TASK0);
         assert_eq!(get_task(1).unwrap(), &TASK1);
@@ -241,44 +243,65 @@ mod tests {
         assert_eq!(get_task(3), None);
     }
 
-    #[test]
     fn test_delete() {
-        create(&TASK0, 0xDEADBEEF);
-        assert_eq!(delete(0), false);
-        assert_eq!(get_task(0), None);
+        assert_eq!(delete(2), false);
+        assert_eq!(get_task(2), None);
     }
 
-    #[test]
-    fn test_suspend_and_resume() {
-        create(&TASK0, 0xDEADBEEF);
+    fn test_suspend_resume() {
         assert_eq!(suspend(0), false);
         assert!(TASK0.is_suspended());
         resume(0);
         assert!(TASK0.is_ready())
     }
 
-    #[test]
-    fn test_run_scheduler() {
-        let task0_stack_ptr = 0xAA;
-        let task1_stack_ptr = 0xBB;
-        let task2_stack_ptr = 0xCC;
-        create(&TASK0, task0_stack_ptr);
-        create(&TASK1, task1_stack_ptr);
-        create(&TASK2, task2_stack_ptr);
-
-        assert_eq!(run_scheduler(task0_stack_ptr), task0_stack_ptr);
+    fn test_schduler() {
+        // Task 0 is the highest priority task and is ready to run
+        assert_eq!(run_scheduler(IDLE_SP), TASK0_SP);
         assert_eq!(get_current_task(), Some(&TASK0));
-        TASK0.sleep(5);
-        assert_eq!(run_scheduler(task0_stack_ptr), task1_stack_ptr);
+        assert_eq!(get_current_tick(), 0);
+
+        // Sleep task 0 for 5 ticks
+        sleep(5);
+        assert!(TASK0.is_sleep());
+
+        // Progress by 3 ticks
+        assert_eq!(update_tick(3), false);
+        assert_eq!(get_current_tick(), 3);
+
+        // Task 1 is the highest priority task and is ready to run
+        assert_eq!(run_scheduler(TASK0_SP), TASK1_SP);
         assert_eq!(get_current_task(), Some(&TASK1));
-        TASK1.sleep(5);
-        assert_eq!(run_scheduler(task1_stack_ptr), task2_stack_ptr);
-        assert_eq!(get_current_task(), Some(&TASK2));
+        assert_eq!(WAKE_TICK.load(Ordering::Relaxed), 5);
+
+        // Sleep task 1 for 10 ticks
+        sleep(10);
+        assert!(TASK1.is_sleep());
+
+        // All tasks sleeping (idle)
+        assert_eq!(run_scheduler(TASK1_SP), IDLE_SP);
+        assert_eq!(get_current_task(), Some(&IDLE_TASK));
+        assert_eq!(WAKE_TICK.load(Ordering::Relaxed), 5);
+
+        // Progress by 2 ticks
+        assert_eq!(update_tick(2), true);
+        assert_eq!(get_current_tick(), 5);
+
+        // Task 0 should now be ready to run
+        assert_eq!(run_scheduler(IDLE_SP), TASK0_SP);
+        assert_eq!(get_current_task(), Some(&TASK0));
+        assert_eq!(WAKE_TICK.load(Ordering::Relaxed), 13);
     }
 
     #[test]
-    fn test_update_tick() {
-        update_tick(3);
-        assert_eq!(get_current_tick(), 3);
+    fn test_kernel() {
+        // For simplicity, each test assumes the previous test kernel state is carried over. We
+        // could reset kerenl state between each test case, but we would still need tests to run
+        // without parallelization, as they are all modifying the same set of `static` variables.
+        test_init();
+        test_create();
+        test_delete();
+        test_suspend_resume();
+        test_schduler();
     }
 }

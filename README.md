@@ -18,12 +18,11 @@ real-time kernel for embedded Rust applications (`no_std`).
 ### Architecture
 
 The [`rucos`](kernel) crate is a collection of `no_std` data structures and
-a very simple scheduler. It has no platform specific code or and almost no
-`unsafe` code. Aside to the `Task` data strcuture, the `rucos` crate is not
-designed to be directly used by end users. Instead, a "port specific" crate,
-like [`rucos-cortex-m`](cortex-m) should be used. The port specific crate
-handles architecture details like stack initialization and context switching,
-and ensures scheduling is done in a safely (e.g. disabling interrupts).
+a very simple scheduler. It has no platform specific or `unsafe` code. The
+`rucos` crate is not designed for direct use in an application. Instead, a
+"port specific" crate, like [`rucos-cortex-m`](cortex-m), should be used.
+The port specific crate handles architecture details like context switching
+and ensures scheduling is done safely (e.g. disabling interrupts).
 
 ### Getting Started
 
@@ -56,8 +55,8 @@ rucos::start(...);
 ### Dependencies
 
 * To build `rucos` and `rucos-cortex-m`, the Rust toolchain is required
-* To run the `rucos-cortex-m` examples, [`probe-rs`](https://probe.rs/) is required
-* To debug the `rucos-cortex-m` examples, the `probe-rs` VS Code extension is required
+* To run `rucos-cortex-m` examples, [`probe-rs`](https://probe.rs/) is required
+* To debug `rucos-cortex-m` examples, the `probe-rs` VS Code extension is required
 
 ### Building
 
@@ -72,11 +71,12 @@ rucos::start(...);
 #### [`rucos-cortex-m`](cortex-m)
 
 Testing `rucos-cortex-m` requires targeting a particular device. The STM32F767
-microcontroller is used as the test platform, but note that the example code
-should be easily portable to other devices.
+microcontroller is used as the test platform, but the example code should be
+easily portable to other devices.
 
-Ideally `cargo test` would be used to automate target testing via `defmt-test`,
-but the nature of RuCOS applications is that they do not terminate and or follow
-a serial sequence of steps we can assert on. Instead [`examples`](cortex-m/examples/) are used for testing and each one must be run manually:
+Ideally `cargo test` would be used to automate on-device testing with
+`defmt-test`, but RuCOS applications do not terminate or have a serial
+sequence of steps we can assert on. Instead, [`examples`](cortex-m/examples/)
+are used for on-device testing. Each one must be run manually:
 
     cd cortex-m && cargo run --example <name>

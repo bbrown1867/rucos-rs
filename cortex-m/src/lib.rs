@@ -8,7 +8,7 @@ use core::sync::atomic::Ordering;
 use cortex_m::peripheral::{scb, syst::SystClkSource, SCB, SYST};
 use rucos::kernel;
 
-// Re-export to simplify things for the end user
+// Re-export to allow the end user to depend on just one crate
 pub use rucos::task::Task;
 
 fn init_task_stack(stack: &[u8], entry: fn(u32) -> !, arg: Option<u32>) -> u32 {
@@ -67,8 +67,8 @@ pub fn init(idle_stack: &[u8], user_idle_task: Option<fn(u32) -> !>) {
 ///
 /// # Arguments
 ///
-/// * `scb`: System control block (from the `cortex-m` crate)
-/// * `systick`: System tick  (from the `cortex-m` crate)
+/// * `scb`: System control block (from `cortex-m` crate)
+/// * `systick`: System tick  (from `cortex-m` crate)
 /// * `clock_freq_hz`: Core clock frequency in hertz
 /// * `tick_rate_hz`: System tick rate in hertz
 ///
@@ -172,9 +172,8 @@ pub fn get_current_tick() -> u32 {
 ///
 /// Ticks correspond to system time based on `tick_rate_hz` passed to [`start`].
 pub fn sleep(delay: u32) {
-    if kernel::sleep(delay) {
-        SCB::set_pendsv();
-    }
+    kernel::sleep(delay);
+    SCB::set_pendsv();
 }
 
 /// Suspend a task

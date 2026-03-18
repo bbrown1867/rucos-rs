@@ -8,7 +8,7 @@ use stm32f7xx_hal::{pac, prelude::*};
 pub const TICK_RATE_HZ: u32 = 1000;
 
 pub const IDLE_STACK_SIZE: usize = 256;
-pub const TASK_STACK_SIZE: usize = 512;
+pub const TASK_STACK_SIZE: usize = 1024;
 
 pub const TASK0_ID: usize = 0;
 pub const TASK1_ID: usize = 1;

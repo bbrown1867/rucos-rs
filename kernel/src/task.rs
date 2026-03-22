@@ -1,7 +1,7 @@
 //! RuCOS Task
 //!
 //! Users can initialize tasks using [`Task::new`], providing an identifier ([`Task::id`]) and a
-//! task priority. The [`Task`] must have `static` lifetime and the idenfitier must be a unique
+//! task priority. The [`Task`] must have `static` lifetime and the identifier must be a unique
 //! integer in the range `[0:MAX_NUM_TASKS)`.
 
 use core::cmp::{self, PartialOrd};

@@ -255,7 +255,7 @@ mod tests {
         assert!(TASK0.is_ready())
     }
 
-    fn test_schduler() {
+    fn test_scheduler() {
         // Task 0 is the highest priority task and is ready to run
         assert_eq!(run_scheduler(IDLE_SP), TASK0_SP);
         assert_eq!(get_current_task(), Some(&TASK0));
@@ -302,6 +302,6 @@ mod tests {
         test_create();
         test_delete();
         test_suspend_resume();
-        test_schduler();
+        test_scheduler();
     }
 }
